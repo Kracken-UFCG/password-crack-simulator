@@ -19,7 +19,7 @@ def separate_file_by_number_of_chars(num_chars):
         )
         output_path = os.path.join(data_directories, output_filename)
 
-        print(f"Processando: {file_name}")
+        print(f"extracting: {file_name}")
 
         with open(pathway, "r", encoding="latin-1") as infile:
             with open(output_path, "w") as outfile:
