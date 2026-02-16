@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Password Crack Simulator</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <main>
+        <div class="principal-container">
+            <svg xmlns="http://www.w3.org/2000/svg" width="138" height="145" viewBox="0 0 138 145" fill="none">
+                <path d="M96.25 48.125C103.812 48.125 110 54.3125 110 61.875V130.625C110 138.188 103.812 144.375 96.25 144.375H13.75C6.1875 144.375 0 138.188 0 130.625V61.875C0 54.3125 6.1875 48.125 13.75 48.125H75.625V34.375C75.625 22.6875 66.6875 13.75 55 13.75C43.3125 13.75 34.375 22.6875 34.375 34.375H20.625C20.625 15.125 35.75 0 55 0C74.25 0 89.375 15.125 89.375 34.375V48.125H96.25ZM55 110C62.5625 110 68.75 103.812 68.75 96.25C68.75 88.6875 62.5625 82.5 55 82.5C47.4375 82.5 41.25 88.6875 41.25 96.25C41.25 103.812 47.4375 110 55 110ZM137.5 82.5H123.75V41.25H137.5V82.5ZM137.5 110H123.75V96.25H137.5V110Z" fill="#1744A4"/>
+            </svg>
+            <h1>KRACKEN</h1>
+
+            <div class="interact-container">
+                <div class="input-section">
+                    <div class="input-box">
+                        <input type="password" id="password" class="styled-input" value="*****">
+                        <label for="password" class="floating-label">Password</label>
+
+                        <span class="eye-icon" onclick="togglePassword('password', this)">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                        </span>
+                    </div>
+
+                    <div class="input-box">
+                        <input type="password" id="confirm-password" class="styled-input" value="*****">
+                        <label for="confirm-password" class="floating-label">Confirm Password</label> 
+                        <span class="eye-icon" onclick="togglePassword('confirm-password', this)">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                        </span>
+                    </div>
+
+                    <button>Crack it!</button>
+                </div>
+                                
+                <div class="classify-section">
+                    <h3>Password Classify</h3>
+                </div>
+            </div>
+
+        </div>
+    </main>
+    <script src="regex.js"></script>
+</body>
+</html>

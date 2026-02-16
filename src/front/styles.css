@@ -1,0 +1,150 @@
+:root {
+    --primary-color: #143A8C;
+    --outline: #1A5DA9;
+    --background-light: #F2F0ED;
+    --text-color: #222222;
+    --form-background: #E5E8ED;
+    --password-text: #1744A4;
+}
+
+body {
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    
+    background-color: var(--primary-color);
+    font-family: 'Inter', sans-serif;
+    line-height: normal;
+}
+
+h1, h2, h3 {
+    color: var(--password-text);
+}
+
+.principal-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    
+    width: 1040px;
+    height: 600px;
+    padding: 60px;
+    
+    background-color: var(--background-light);
+    border-radius: 45px;
+}
+
+.interact-container {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 100px;
+    
+    margin-top: auto;
+    margin-bottom: auto;
+}
+
+.input-section, 
+.classify-section {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.input-box {
+    position: relative;
+    width: 300px;
+}
+
+.styled-input {
+    display: flex;
+    width: 100%;
+    height: 50px;
+    box-sizing: border-box;
+    
+    font-size: 22px;
+    color: var(--password-text);
+    letter-spacing: 2px;
+    
+    background-color: var(--form-background);
+    border: 2px solid var(--outline);
+    border-radius: 13px;
+    outline: none;
+    
+    padding: 15px;
+    padding-right: 45px;
+}
+
+.floating-label {
+    position: absolute;
+    top: 0;
+    left: 15px;
+    transform: translateY(-50%);
+    pointer-events: none;
+    
+    background-color: var(--form-background);
+    padding: 0 5px;
+    border-radius: 10px;
+    
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--outline);
+}
+
+.eye-icon {
+    position: absolute;
+    right: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    
+    color: var(--outline);
+    cursor: pointer;
+    transition: color 0.3s;
+}
+
+.eye-icon svg {
+    width: 20px;
+    height: 20px;
+}
+
+.eye-icon:hover {
+    color: var(--primary-color);
+}
+
+button {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    
+    width: 277px;
+    height: 50px;
+    margin-top: 10px;
+    
+    background: var(--primary-color);
+    border: 1px solid var(--outline);
+    border-radius: 13px;
+    
+    color: var(--background-light);
+    font-size: 20px;
+    font-weight: 600;
+    font-style: normal;
+    text-align: center;
+    line-height: normal;
+    cursor: pointer;
+}
+
+button:hover {
+    background: var(--outline);
+}
+
+.styled-input, 
+button {
+    box-shadow: 0 0 12px rgba(0, 119, 255, 0.25);
+}
