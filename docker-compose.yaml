@@ -4,20 +4,30 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: kracken-backend
-    runtime: nvidia
+    env_file:
+      - config.env
     ports:
-      - "8082:8082"
-    environment:
-      - PORT=8082
-      - NVIDIA_VISIBLE_DEVICES=all
+      - "${BACKEND_PORT:-8082}:8082"
     volumes:
       - ./data:/app/data
       - ./results.csv:/app/results.csv
+    
+    # IMPORTANT: Uncomment the block below to enable NVIDIA GPU support.
+    # Keep these lines commented out if running on a CPU-only machine.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
 
   frontend:
     image: nginx:alpine
     container_name: kracken-frontend
+    env_file:
+      - config.env
     ports:
-      - "8081:80"
+      - "${FRONT_PORT:-8081}:80"
     volumes:
       - ./src/front:/usr/share/nginx/html:ro

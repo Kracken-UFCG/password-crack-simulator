@@ -1,74 +1,45 @@
-# ================================================================
-#  Password Crack Simulator — Makefile
-#
-#  Targets:
-#    make cpu          — builds CPU version (g++, any machine)
-#    make gpu          — builds GPU version (nvcc, requires CUDA)
-#    make run-front    — starts frontend server
-#    make clean        — removes binaries
-# ================================================================
+-include config.env
 
-PORT      ?= 8081
-FRONT_DIR  = src/front
+USE_GPU ?= false
+GPU_SM ?= 86
+FRONT_PORT ?= 8081
+BACKEND_PORT ?= 8082
 
-# ── CPU ──────────────────────────────────────────────────────────
-CPU_TARGET = password-crack-cpu
-CPU_DIR    = src/backend/cpu
-CPU_SRCS   = $(CPU_DIR)/main.cpp \
-             $(CPU_DIR)/cracker/cracker.cpp \
-             $(CPU_DIR)/output/output.cpp
-CPU_FLAGS  = -O3 -march=native -mavx2 -std=c++17 -pthread \
-             -I$(CPU_DIR)
+CPU_FLAGS = -O3 -march=native -mavx2 -std=c++17 -pthread -Isrc/backend/cpu
+GPU_FLAGS = -O3 -arch=sm_$(GPU_SM) -std=c++17 --compiler-options "-O3 -march=native -mavx2"
 
-# ── GPU ──────────────────────────────────────────────────────────
-GPU_TARGET = password-crack-gpu
-GPU_DIR    = src/backend/gpu
-GPU_SRC    = $(GPU_DIR)/main.cu
+TARGETS = cpu
+ifeq ($(USE_GPU),true)
+	TARGETS += gpu
+endif
 
-# Auto-detect GPU SM (override with: make gpu SM=89)
-SM        ?= $(shell nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null \
-               | head -1 | tr -d '.' || echo "86")
-GPU_FLAGS  = -O3 -arch=sm_$(SM) -std=c++17 \
-             --compiler-options "-O3 -march=native -mavx2"
-
-# ── Targets ──────────────────────────────────────────────────────
-all: cpu
+all: $(TARGETS)
 	@echo ""
-	@echo "  make cpu          - CPU version (any machine)"
-	@echo "  make gpu          - GPU version (needs CUDA + nvcc)"
-	@echo "  make run-front    - frontend on localhost:$(PORT)"
+	@echo "build complete! (USE_GPU=$(USE_GPU))"
 
-build:
-	bash utils/download_data.sh
+cpu:
+	@echo "building CPU binary."
+	@g++ $(CPU_FLAGS) -o password-crack-cpu src/backend/cpu/main.cpp src/backend/cpu/cracker/cracker.cpp src/backend/cpu/output/output.cpp
 
-cpu: $(CPU_SRCS)
-	g++ $(CPU_FLAGS) -o $(CPU_TARGET) $^
-	@echo "✔  CPU binary: ./$(CPU_TARGET)"
-	@echo "   usage: ./$(CPU_TARGET) <password> <strength>"
-
-gpu: $(GPU_SRC)
-	nvcc $(GPU_FLAGS) -o $(GPU_TARGET) $<
-	@echo "✔  GPU binary: ./$(GPU_TARGET)  (sm_$(SM))"
-	@echo "   usage: ./$(GPU_TARGET) <password> <strength>"
+gpu:
+	@echo "building GPU binary (sm_$(GPU_SM))."
+	@nvcc $(GPU_FLAGS) -o password-crack-gpu src/backend/gpu/main.cu
 
 run-front:
-	@echo "Front running on http://localhost:$(PORT)"
-	@echo "Press CTRL+C to stop."
-	@python3 -m http.server $(PORT) --directory $(FRONT_DIR)
+	@echo "running frontend on port $(FRONT_PORT)."
+	@python3 -m http.server $(FRONT_PORT) --directory src/front
+
+build-data:
+	bash utils/download_data.sh
 
 clean:
-	rm -f $(CPU_TARGET) $(GPU_TARGET)
+	rm -f password-crack-cpu password-crack-gpu results.csv
 
 help:
-	@echo ""
-	@echo "  make              - builds CPU version"
-	@echo "  make cpu          - builds CPU version (g++)"
-	@echo "  make gpu          - builds GPU version (nvcc, CUDA required)"
-	@echo "  make gpu SM=89    - GPU for RTX 4090 (Ada Lovelace)"
-	@echo "  make gpu SM=120   - GPU for RTX 5060 (Blackwell)"
-	@echo "  make run-front           - frontend on port $(PORT)"
-	@echo "  make run-front PORT=3000 - frontend on custom port"
-	@echo "  make clean        - removes binaries"
-	@echo ""
+	@echo "  make all       - Build based on config.env"
+	@echo "  make cpu       - Build CPU binary only"
+	@echo "  make gpu       - Build GPU binary (sm_$(GPU_SM))"
+	@echo "  make build-data- Download rockyou.txt"
+	@echo "  make clean     - Remove binaries"
 
-.PHONY: all build cpu gpu run-front clean help
+.PHONY: all cpu gpu run-front build-data clean help

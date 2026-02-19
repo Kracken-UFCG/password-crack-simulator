@@ -8,14 +8,13 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-COPY Makefile ./
+COPY Makefile config.env ./
 COPY src/ ./src/
 COPY utils/ ./utils/
 
 RUN mkdir -p data
 
-RUN make cpu
-RUN make gpu SM=120
+RUN make all
 
 EXPOSE 8082
 
