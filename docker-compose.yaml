@@ -1,0 +1,23 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kracken-backend
+    runtime: nvidia
+    ports:
+      - "8082:8082"
+    environment:
+      - PORT=8082
+      - NVIDIA_VISIBLE_DEVICES=all
+    volumes:
+      - ./data:/app/data
+      - ./results.csv:/app/results.csv
+
+  frontend:
+    image: nginx:alpine
+    container_name: kracken-frontend
+    ports:
+      - "8081:80"
+    volumes:
+      - ./src/front:/usr/share/nginx/html:ro
