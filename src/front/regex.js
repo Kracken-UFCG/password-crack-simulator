@@ -224,7 +224,7 @@ function renderResult(data, strength) {
     if (leaked) {
         verdictEl.textContent = 'LEAKED';
         verdictEl.classList.add('leaked');
-    } else if (method === 'brute_force') {
+    } else if (method === 'brute_force' || method === 'brute_force_gpu') {
         verdictEl.textContent = 'CRACKED';
         verdictEl.classList.add('cracked');
     } else {
