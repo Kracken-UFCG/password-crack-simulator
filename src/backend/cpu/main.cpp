@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 #include <thread>
+
 #include "types.hpp"
 #include "cracker/cracker.hpp"
 #include "kdf/kdf.hpp"
@@ -13,8 +14,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::string password = argv[1];
-    std::string strength = argv[2];
+    const std::string password = argv[1];
+    const std::string strength = argv[2];
 
     // Parse --kdf <cost>
     KdfMeta kdf{ .enabled = false, .cost = 0, .rounds = 0, .time_per_attempt_sec = 0.0 };
@@ -42,7 +43,9 @@ int main(int argc, char* argv[]) {
         std::cerr << "[cpu] kdf time/attempt=" << sample.elapsed_sec << "s\n";
     }
 
-    // Phase 1 — dictionary
+    // ========================
+    // Phase 1 — Dictionary
+    // ========================
     std::cerr << "[cpu] running dictionary attack...\n";
     DictResult dict = check_dictionary(password);
 
