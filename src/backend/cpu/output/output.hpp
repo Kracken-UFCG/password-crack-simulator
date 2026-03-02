@@ -9,6 +9,7 @@ void print_csv_header();
 void print_csv_row(
     const std::string& password,
     const std::string& strength,
+    const KdfMeta&     kdf,
     const DictResult&  dict,
     const BruteResult& brute
 );

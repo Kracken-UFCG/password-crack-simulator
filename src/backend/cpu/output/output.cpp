@@ -13,25 +13,17 @@ using namespace std;
 // ================================================================
 
 void print_csv_header() {
-    cout << "password"
-         << ",strength"
-         << ",leaked"
-         << ",dict_entries_checked"
-         << ",dict_time_s"
-         << ",cracktime_s"
-         << ",attempts"
-         << ",latency_ns"
-         << ",method"
+    cout << "password,strength,leaked"
+         << ",dict_entries_checked,dict_time_s"
+         << ",kdf_enabled,kdf_cost,kdf_rounds,kdf_time_per_attempt_s"
+         << ",cracktime_s,kdf_total_s,attempts,latency_ns,method"
          << "\n";
 }
 
-void print_csv_row(
-    const string& password,
-    const string& strength,
-    const DictResult&  dict,
-    const BruteResult& brute)
+void print_csv_row(const string& password, const string& strength,
+                   const KdfMeta& kdf, const DictResult& dict,
+                   const BruteResult& brute)
 {
-    // Determine final method and cracktime
     string method;
     double cracktime = 0.0;
     uint64_t attempts = 0;
@@ -41,16 +33,9 @@ void print_csv_row(
         method    = "dictionary";
         cracktime = dict.elapsed_sec;
         attempts  = dict.lines_checked;
-        latency_ns = (attempts > 0)
-            ? (dict.elapsed_sec * 1e9 / (double)attempts)
-            : 0.0;
-    } else if (brute.found) {
-        method     = "brute_force";
-        cracktime  = brute.elapsed_sec;
-        attempts   = brute.attempts;
-        latency_ns = brute.latency_ns;
+        latency_ns = (attempts > 0) ? (dict.elapsed_sec * 1e9 / attempts) : 0.0;
     } else {
-        method     = "not_found";
+        method     = brute.method;
         cracktime  = brute.elapsed_sec;
         attempts   = brute.attempts;
         latency_ns = brute.latency_ns;
@@ -62,7 +47,12 @@ void print_csv_row(
          << "," << (dict.leaked ? "yes" : "no")
          << "," << dict.lines_checked
          << "," << dict.elapsed_sec
-         << "," << cracktime
+         << "," << (kdf.enabled ? "yes" : "no")
+         << "," << kdf.cost
+         << "," << kdf.rounds
+         << "," << kdf.time_per_attempt_sec   // tempo de 1 derivação (calibração)
+         << "," << cracktime                  // crack total (KDF incluído)
+         << "," << brute.kdf_total_sec        // fatia só do KDF no crack
          << "," << attempts
          << "," << latency_ns
          << "," << method

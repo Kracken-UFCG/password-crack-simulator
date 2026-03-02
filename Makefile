@@ -4,7 +4,7 @@ USE_GPU ?= false
 GPU_SM ?= 86
 FRONT_PORT ?= 8081
 BACKEND_PORT ?= 8082
-
+LDFLAGS += -lcrypt
 CPU_FLAGS = -O3 -march=native -mavx2 -std=c++17 -pthread -Isrc/backend/cpu
 GPU_FLAGS = -O3 -arch=sm_$(GPU_SM) -std=c++17 --compiler-options "-O3 -march=native -mavx2"
 
@@ -19,11 +19,19 @@ all: $(TARGETS)
 
 cpu:
 	@echo "building CPU binary."
-	@g++ $(CPU_FLAGS) -o password-crack-cpu src/backend/cpu/main.cpp src/backend/cpu/cracker/cracker.cpp src/backend/cpu/output/output.cpp
+	@g++ $(CPU_FLAGS) -o password-crack-cpu \
+		src/backend/cpu/main.cpp \
+		src/backend/cpu/cracker/cracker.cpp \
+		src/backend/cpu/output/output.cpp \
+		src/backend/cpu/kdf/kdf.cpp \
+		$(LDFLAGS)
 
 gpu:
 	@echo "building GPU binary (sm_$(GPU_SM))."
-	@nvcc $(GPU_FLAGS) -o password-crack-gpu src/backend/gpu/main.cu
+	@nvcc $(GPU_FLAGS) -o password-crack-gpu \
+		src/backend/gpu/main.cu \
+		src/backend/cpu/kdf/kdf.cpp \
+		$(LDFLAGS)
 
 run-front:
 	@echo "running frontend on port $(FRONT_PORT)."

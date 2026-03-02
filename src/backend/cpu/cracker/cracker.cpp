@@ -1,5 +1,5 @@
 #include "cracker.hpp"
-
+#include "../kdf/kdf.hpp"
 #include <thread>
 #include <atomic>
 #include <mutex>
@@ -25,12 +25,12 @@ static const int   MAX_LEN      = 8;
 
 static atomic<bool>     g_found(false);
 static atomic<uint64_t> g_tested(0);
+static atomic<uint64_t> g_kdf_ns(0);   // <-- novo: acumula ns gastos só no KDF
 static string           g_found_str;
 static mutex            g_mtx;
 
 // ================================================================
-//  AVX2 fast comparison — 32 bytes in a single CPU instruction.
-//  Falls back to memcmp on CPUs without AVX2 support.
+//  fast_eq — igual ao original
 // ================================================================
 static inline bool fast_eq(const char* a, const char* b, int len) {
 #ifdef __AVX2__
@@ -47,21 +47,19 @@ static inline bool fast_eq(const char* a, const char* b, int len) {
 }
 
 // ================================================================
-//  Phase 1 — Dictionary attack (RockYou)
+//  Phase 1 — Dictionary (igual ao original)
 // ================================================================
 DictResult check_dictionary(const string& password) {
     FILE* f = fopen(ROCKYOU_PATH, "rb");
     if (!f) return { false, 0, 0.0 };
 
     int target_len = (int)password.size();
-
     alignas(32) char target_buf[32] = {0};
     memcpy(target_buf, password.c_str(), min(target_len, 32));
 
     char     raw[512];
     uint64_t count = 0;
     bool     found = false;
-
     auto t0 = high_resolution_clock::now();
 
     while (fgets(raw, sizeof(raw), f)) {
@@ -75,9 +73,7 @@ DictResult check_dictionary(const string& password) {
         memcpy(line_buf, raw, len);
 
         if (fast_eq(line_buf, target_buf, len)) {
-            found = true;
-            count++;
-            break;
+            found = true; count++; break;
         }
         count++;
     }
@@ -88,21 +84,17 @@ DictResult check_dictionary(const string& password) {
 }
 
 // ================================================================
-//  Phase 2 — Optimized multithreaded brute force
-//
-//  Optimizations:
-//  1. Incremental generation  — no divisions in the hot loop (odometer)
-//  2. uint64_t comparison     — one integer op replaces memcmp for <=8 chars
-//  3. Batched atomic check    — g_found read every 4096 iters, not every iter
-//  4. CPU affinity            — each thread pinned to a physical core
+//  Phase 2 — Brute force com KDF opcional por tentativa
 // ================================================================
 struct WorkerArgs {
-    int  thread_id;
-    int  num_threads;
-    int  str_len;
-    char target[MAX_LEN + 1];
-    int  target_len;
-    int  num_cores;
+    int     thread_id;
+    int     num_threads;
+    int     str_len;
+    char    target[MAX_LEN + 1];
+    int     target_len;
+    int     num_cores;
+    KdfMeta kdf;
+    string  target_hash;   // hash bcrypt do target (usado se kdf.enabled)
 };
 
 static void worker(WorkerArgs a) {
@@ -122,7 +114,6 @@ static void worker(WorkerArgs a) {
     uint64_t end   = (a.thread_id == a.num_threads - 1) ? total : start + per;
     if (start >= end) return;
 
-    // Build initial candidate from start index (one-time division only)
     int indices[MAX_LEN] = {0};
     {
         uint64_t tmp = start;
@@ -132,53 +123,78 @@ static void worker(WorkerArgs a) {
         }
     }
 
-    // Pack target into uint64 for single-shot comparison
+    // Para comparação rápida sem KDF
     uint64_t target_u64 = 0;
     memcpy(&target_u64, a.target, MAX_LEN);
 
     char     candidate[MAX_LEN + 1] = {0};
-    uint64_t candidate_u64          = 0;
-    uint64_t local_count            = 0;
+    uint64_t local_count  = 0;
+    uint64_t local_kdf_ns = 0;   // acumula ns KDF deste thread
 
     for (uint64_t idx = start; idx < end; idx++) {
         if ((local_count & 0xFFF) == 0 && g_found) {
-            g_tested.fetch_add(local_count, memory_order_relaxed);
+            g_tested.fetch_add(local_count,  memory_order_relaxed);
+            g_kdf_ns.fetch_add(local_kdf_ns, memory_order_relaxed);
             return;
         }
 
         for (int i = 0; i < a.str_len; i++)
             candidate[i] = CHARSET[indices[i]];
+        candidate[a.str_len] = '\0';
 
-        memcpy(&candidate_u64, candidate, MAX_LEN);
-        if (candidate_u64 == target_u64) {
+        bool match = false;
+
+        if (a.kdf.enabled) {
+            // ---- caminho com KDF: deriva o candidato e compara o hash ----
+            double kdf_t = 0.0;
+            bool ok = kdf_bcrypt_verify(string(candidate, a.str_len),
+                                        a.target_hash, &kdf_t);
+            local_kdf_ns += (uint64_t)(kdf_t * 1e9);
+            match = ok;
+        } else {
+            // ---- caminho rápido original: comparação uint64 ----
+            uint64_t candidate_u64 = 0;
+            memcpy(&candidate_u64, candidate, MAX_LEN);
+            match = (candidate_u64 == target_u64);
+        }
+
+        if (match) {
             lock_guard<mutex> lk(g_mtx);
             if (!g_found) {
                 g_found     = true;
                 g_found_str = string(candidate, a.str_len);
             }
             g_tested.fetch_add(local_count + 1, memory_order_relaxed);
+            g_kdf_ns.fetch_add(local_kdf_ns,    memory_order_relaxed);
             return;
         }
 
-        // Odometer increment — zero divisions
         for (int i = a.str_len - 1; i >= 0; i--) {
             if (++indices[i] < CHARSET_LEN) break;
             indices[i] = 0;
         }
-
         local_count++;
     }
 
-    g_tested.fetch_add(local_count, memory_order_relaxed);
+    g_tested.fetch_add(local_count,  memory_order_relaxed);
+    g_kdf_ns.fetch_add(local_kdf_ns, memory_order_relaxed);
 }
 
-BruteResult brute_force(const string& password) {
+BruteResult brute_force(const string& password, const KdfMeta& kdf) {
     g_found     = false;
     g_found_str = "";
     g_tested    = 0;
+    g_kdf_ns    = 0;
 
     int num_threads = max(1, (int)thread::hardware_concurrency());
     int target_len  = (int)password.size();
+
+    // Se KDF habilitado: pré-computa o hash do target UMA vez
+    string target_hash;
+    if (kdf.enabled) {
+        KdfResult kr = kdf_bcrypt(password, kdf.cost);
+        target_hash  = kr.hash;
+    }
 
     auto t0 = high_resolution_clock::now();
 
@@ -195,6 +211,8 @@ BruteResult brute_force(const string& password) {
             a.str_len     = len;
             a.target_len  = target_len;
             a.num_cores   = num_threads;
+            a.kdf         = kdf;
+            a.target_hash = target_hash;
             memset(a.target, 0, sizeof(a.target));
             memcpy(a.target, password.c_str(), target_len);
             pool.emplace_back(worker, a);
@@ -203,10 +221,20 @@ BruteResult brute_force(const string& password) {
         for (auto& th : pool) th.join();
     }
 
-    double   elapsed  = duration<double>(high_resolution_clock::now() - t0).count();
-    uint64_t attempts = g_tested.load();
-    double   lat_ns   = (attempts > 0) ? (elapsed * 1e9 / (double)attempts) : 0.0;
-    string   method   = g_found.load() ? "brute_force" : "not_found";
+    double   elapsed      = duration<double>(high_resolution_clock::now() - t0).count();
+    uint64_t attempts     = g_tested.load();
+    uint64_t kdf_ns_total = g_kdf_ns.load();
+    double   kdf_total    = (double)kdf_ns_total / 1e9;
+    double   lat_ns       = (attempts > 0) ? (elapsed * 1e9 / (double)attempts) : 0.0;
+    string   method       = g_found.load() ? "brute_force" : "not_found";
 
-    return { g_found.load(), g_found_str, attempts, elapsed, lat_ns, method };
+    return {
+        .found          = g_found.load(),
+        .password       = g_found_str,
+        .attempts       = attempts,
+        .elapsed_sec    = elapsed,      // crack total (KDF já está incluído)
+        .kdf_total_sec  = kdf_total,    // fatia só do KDF
+        .latency_ns     = lat_ns,
+        .method         = method
+    };
 }
