@@ -31,36 +31,6 @@ const CRITERIA = {
     notriple:  (s) => !/(.)\1\1/.test(s),
 };
 
-function classificarSenha(senha) {
-    if (!senha) return null;
-
-    const temEspaco   = /\s/.test(senha);
-    const temTripla   = /(.)\1\1/.test(senha);
-    const temPar      = /(..).*\1/.test(senha);
-
-    const c = {
-        len:      CRITERIA.len(senha),
-        upper:    CRITERIA.upper(senha),
-        number:   CRITERIA.number(senha),
-        special:  CRITERIA.special(senha),
-        notriple: CRITERIA.notriple(senha),
-    };
-
-    // Fraca: espaço, ou tripla, ou menos de 7 chars
-    if (temEspaco || temTripla || senha.length < 7) {
-        return { level: 'Weak', criteria: c };
-    }
-
-    // Forte: ≥9 chars, sem par repetido, tem upper+number+special
-    const advancedScore = [c.upper, c.number, c.special].filter(Boolean).length;
-    if (senha.length >= 9 && !temPar && advancedScore === 3) {
-        return { level: 'Strong', criteria: c };
-    }
-
-    // Médio: resto
-    return { level: 'Medium', criteria: c };
-}
-
 function updateStrengthUI(senha) {
     const bar    = document.getElementById('strength-bar');
     const label  = document.getElementById('strength-label');
