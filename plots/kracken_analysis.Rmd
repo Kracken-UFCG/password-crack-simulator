@@ -1,0 +1,505 @@
+---
+title: "Kracken — Análise de Dados: Password Crack Simulator"
+author: "UFCG"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: darkly
+    highlight: zenburn
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.width = 10, fig.height = 6)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(scales)
+library(stringr)
+library(forcats)
+```
+
+> **Como usar:** Este notebook espera um arquivo `results.csv` (saída do backend Kracken)
+> e/ou `batch_results.csv` (saída do `batch_crack.py`).  
+> Adapte os caminhos na célula abaixo e rode tudo.
+
+```{r load-data}
+# ── Carrega os dados ──────────────────────────────────────────────────────────
+# Arquivo gerado pelo backend (via API ou pipeline.sh)
+# Colunas esperadas (CPU, versão com KDF):
+#   password, strength, entropy_max, entropy_class, entropy_shannon,
+#   search_space, early_ratio, leaked,
+#   dict_entries_checked, dict_time_s,
+#   kdf_enabled, kdf_cost, kdf_rounds, kdf_time_per_attempt_s,
+#   cracktime_s, kdf_total_s, attempts, attempts_per_sec, latency_ns, method
+#
+# Se você tiver benchmark.csv (CPU vs GPU sem KDF), troque abaixo.
+
+CSV_PATH <- "results.csv"   # <-- altere se necessário
+
+df_raw <- read.csv(CSV_PATH, stringsAsFactors = FALSE)
+
+# Garante colunas derivadas
+df <- df_raw %>%
+  mutate(
+    pwd_length     = nchar(password),
+    leaked         = (leaked == "yes"),
+    kdf_enabled    = if ("kdf_enabled" %in% names(.)) (kdf_enabled == "yes") else FALSE,
+    kdf_cost       = if ("kdf_cost" %in% names(.)) as.numeric(kdf_cost) else NA_real_,
+    cracktime_s    = as.numeric(cracktime_s),
+    attempts       = as.numeric(attempts),
+    attempts_per_sec = as.numeric(attempts_per_sec),
+    latency_ns     = as.numeric(latency_ns),
+    entropy_max    = if ("entropy_max" %in% names(.)) as.numeric(entropy_max) else NA_real_,
+    entropy_class  = if ("entropy_class" %in% names(.)) as.numeric(entropy_class) else NA_real_,
+    entropy_shannon= if ("entropy_shannon" %in% names(.)) as.numeric(entropy_shannon) else NA_real_,
+    strength       = factor(strength, levels = c("Weak","Medium","Strong")),
+    method         = factor(method)
+  )
+
+cat("Linhas carregadas:", nrow(df), "\n")
+cat("Colunas:", paste(names(df), collapse=", "), "\n")
+glimpse(df)
+```
+
+---
+
+# 🔴 MUITO INTERESSANTE
+
+## 1. % de Senhas Vazadas — Rockyou Coverage
+
+**Pergunta:** Das senhas testadas, quantas já estavam no rockyou.txt?  
+**Por que importa:** Se uma senha está no dicionário, ela é quebrada em **milissegundos**, independente do comprimento ou complexidade visual.
+
+```{r rockyou-coverage}
+coverage <- df %>%
+  summarise(
+    total       = n(),
+    leaked_n    = sum(leaked),
+    not_leaked  = sum(!leaked),
+    leaked_pct  = mean(leaked) * 100
+  )
+
+print(coverage)
+
+# Pizza / bar
+df_pie <- data.frame(
+  status = c("Vazada (rockyou)", "Não encontrada"),
+  n      = c(coverage$leaked_n, coverage$not_leaked)
+) %>% mutate(pct = n / sum(n) * 100,
+             label = paste0(round(pct,1), "%"))
+
+ggplot(df_pie, aes(x = "", y = n, fill = status)) +
+  geom_col(color = "white", width = 1) +
+  coord_polar("y") +
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5),
+            size = 5, fontface = "bold") +
+  scale_fill_manual(values = c("Vazada (rockyou)" = "#e74c3c",
+                               "Não encontrada"   = "#2ecc71")) +
+  labs(title = "Cobertura do Rockyou.txt sobre as senhas testadas",
+       subtitle = paste0("n = ", coverage$total, " senhas"),
+       fill = NULL) +
+  theme_void(base_size = 13) +
+  theme(legend.position = "bottom",
+        plot.title = element_text(face = "bold", hjust = 0.5))
+```
+
+```{r rockyou-by-strength}
+# Por classe de força (regex)
+df %>%
+  group_by(strength) %>%
+  summarise(
+    n          = n(),
+    leaked_pct = mean(leaked) * 100
+  ) %>%
+  ggplot(aes(x = strength, y = leaked_pct, fill = strength)) +
+  geom_col(color = "black", alpha = 0.85, width = 0.6) +
+  geom_text(aes(label = paste0(round(leaked_pct, 1), "%")),
+            vjust = -0.4, fontface = "bold") +
+  scale_fill_manual(values = c(Weak = "#e74c3c", Medium = "#f39c12", Strong = "#2ecc71")) +
+  scale_y_continuous(limits = c(0, 110), labels = label_percent(scale = 1)) +
+  labs(title   = "% de Senhas Vazadas por Classificação do Regex",
+       subtitle = "Senhas 'Strong' pelo regex deveriam aparecer menos no rockyou",
+       x = "Classe (regex)", y = "% Vazadas") +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "none",
+        plot.title = element_text(face = "bold"))
+```
+
+---
+
+## 2. O Regex Classifica Bem? — Correlação Força vs Resistência Real
+
+**Pergunta:** Uma senha classificada como "Strong" pelo regex é realmente mais difícil de quebrar?  
+**Tradeoff:** Regex é barato (O(1)), mas pode dar falsa segurança — "Abc123!xyz" passa como Strong mas pode estar no rockyou.
+
+```{r regex-vs-reality}
+# Verdict real: SURVIVED = não quebrada, CRACKED = brute-force, LEAKED = dicionário
+df <- df %>%
+  mutate(verdict = case_when(
+    leaked               ~ "LEAKED",
+    method == "brute_force" ~ "CRACKED",
+    TRUE                 ~ "SURVIVED"
+  ))
+
+df %>%
+  count(strength, verdict) %>%
+  group_by(strength) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ggplot(aes(x = strength, y = pct, fill = verdict)) +
+  geom_col(color = "black", alpha = 0.85) +
+  geom_text(aes(label = ifelse(pct > 3, paste0(round(pct,0),"%"), "")),
+            position = position_stack(vjust = 0.5), fontface = "bold", size = 3.5) +
+  scale_fill_manual(values = c(
+    LEAKED   = "#e74c3c",
+    CRACKED  = "#e67e22",
+    SURVIVED = "#27ae60"
+  )) +
+  scale_y_continuous(labels = label_percent(scale = 1)) +
+  labs(title   = "Resultado Real vs Classificação do Regex",
+       subtitle = "Quanto do que o regex diz 'Strong' realmente sobreviveu?",
+       x = "Classe (regex)", y = "% do grupo", fill = "Resultado") +
+  theme_bw(base_size = 13) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+```{r regex-confusion}
+# Tabela de confusão: regex previu certo?
+cat("\n=== Sanidade do Regex ===\n")
+df %>%
+  mutate(regex_good = case_when(
+    strength == "Strong" & verdict == "SURVIVED" ~ "TP (Strong e sobreviveu)",
+    strength == "Strong" & verdict != "SURVIVED" ~ "FP (Strong mas quebrada)",
+    strength == "Weak"   & verdict != "SURVIVED" ~ "TN (Weak e quebrada)",
+    strength == "Weak"   & verdict == "SURVIVED" ~ "FN (Weak mas sobreviveu)",
+    TRUE ~ "Medium (intermediário)"
+  )) %>%
+  count(regex_good) %>%
+  arrange(desc(n)) %>%
+  print()
+```
+
+---
+
+## 3. Tamanho da Senha Realmente Importa?
+
+**Pergunta:** Aumentar o comprimento da senha tem impacto exponencial no tempo de crack?  
+**Tradeoff:** Senha mais longa = muito mais segura para brute-force, MAS se estiver no rockyou, tamanho não protege.
+
+```{r length-vs-time}
+df_brute <- df %>% filter(method == "brute_force" & cracktime_s > 0 & pwd_length > 0)
+
+if (nrow(df_brute) > 0) {
+  df_len <- df_brute %>%
+    group_by(pwd_length) %>%
+    summarise(
+      avg_time   = mean(cracktime_s),
+      median_time = median(cracktime_s),
+      n          = n()
+    )
+  
+  ggplot(df_len, aes(x = pwd_length, y = avg_time)) +
+    geom_line(color = "#3498db", size = 1.4) +
+    geom_point(aes(size = n), color = "#e74c3c", alpha = 0.8) +
+    scale_y_log10(labels = label_comma()) +
+    scale_x_continuous(breaks = 1:12) +
+    labs(title   = "Crescimento Exponencial do Tempo de Crack (Brute-Force)",
+         subtitle = "Eixo Y em escala logarítmica — cada +1 char ≈ ×71 no espaço de busca",
+         x = "Comprimento da Senha (chars)",
+         y = "Tempo Médio de Crack (segundos)",
+         size = "n amostras") +
+    theme_bw(base_size = 13) +
+    theme(plot.title = element_text(face = "bold"))
+} else {
+  cat("Nenhuma senha quebrada por brute-force nos dados carregados.\n")
+}
+```
+
+```{r length-leaked-vs-not}
+# Comprimento médio: vazadas vs não vazadas
+df %>%
+  group_by(leaked) %>%
+  summarise(
+    avg_len    = mean(pwd_length),
+    median_len = median(pwd_length),
+    n          = n()
+  ) %>%
+  mutate(grupo = ifelse(leaked, "Vazada (rockyou)", "Não vazada")) %>%
+  ggplot(aes(x = grupo, y = avg_len, fill = grupo)) +
+  geom_col(color = "black", alpha = 0.85, width = 0.5) +
+  geom_text(aes(label = round(avg_len, 1)), vjust = -0.4, fontface = "bold") +
+  scale_fill_manual(values = c("Vazada (rockyou)" = "#e74c3c", "Não vazada" = "#2ecc71")) +
+  labs(title   = "Comprimento Médio: Senhas Vazadas vs Não Vazadas",
+       subtitle = "Senhas no rockyou tendem a ser mais curtas?",
+       x = NULL, y = "Comprimento médio (chars)") +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "none", plot.title = element_text(face = "bold"))
+```
+
+---
+
+## 4. KDF (bcrypt) Vale a Pena? — Impacto Real no Tempo de Crack
+
+**Pergunta:** Habilitar KDF realmente torna o brute-force inviável?  
+**Tradeoff:** KDF aumenta o tempo de crack exponencialmente com o `cost`, mas também aumenta o tempo de login legítimo.
+
+```{r kdf-impact, eval=any(!is.na(df$kdf_cost))}
+df_kdf <- df %>% filter(!is.na(kdf_cost) & cracktime_s > 0)
+
+if (nrow(df_kdf) > 0 & length(unique(df_kdf$kdf_enabled)) > 1) {
+  df_kdf %>%
+    mutate(kdf_label = ifelse(kdf_enabled,
+                              paste0("KDF cost=", kdf_cost),
+                              "Sem KDF")) %>%
+    group_by(kdf_label, pwd_length) %>%
+    summarise(avg_time = mean(cracktime_s), .groups = "drop") %>%
+    ggplot(aes(x = pwd_length, y = avg_time, color = kdf_label, group = kdf_label)) +
+    geom_line(size = 1.3) +
+    geom_point(size = 3) +
+    scale_y_log10(labels = label_comma()) +
+    labs(title   = "Com KDF vs Sem KDF — Tempo de Crack por Comprimento",
+         subtitle = "KDF bcrypt: cada aumento de 1 no cost ≈ dobra o tempo",
+         x = "Comprimento da Senha",
+         y = "Tempo de Crack (s) — log10",
+         color = "Configuração") +
+    theme_bw(base_size = 13) +
+    theme(legend.position = "bottom", plot.title = element_text(face = "bold"))
+} else {
+  cat("Dados insuficientes com/sem KDF para comparação. Rode senhas com e sem --kdf.\n")
+}
+```
+
+```{r kdf-cost-sweep, eval=any(!is.na(df$kdf_cost))}
+df_kdf2 <- df %>% filter(kdf_enabled == TRUE & !is.na(kdf_cost) & cracktime_s > 0)
+
+if (nrow(df_kdf2) > 0) {
+  df_kdf2 %>%
+    group_by(kdf_cost) %>%
+    summarise(
+      avg_crack    = mean(cracktime_s),
+      avg_per_att  = mean(latency_ns / 1e9, na.rm = TRUE),
+      n            = n()
+    ) %>%
+    ggplot(aes(x = as.factor(kdf_cost), y = avg_crack)) +
+    geom_col(fill = "#8e44ad", color = "black", alpha = 0.85) +
+    geom_text(aes(label = paste0(round(avg_crack, 2), "s")),
+              vjust = -0.3, fontface = "bold") +
+    labs(title   = "Tempo Médio de Crack por KDF Cost (bcrypt)",
+         subtitle = "cost=10 → ~1024 rounds | cost=12 → ~4096 rounds",
+         x = "KDF Cost (expoente bcrypt)", y = "Tempo médio de crack (s)") +
+    theme_bw(base_size = 13) +
+    theme(plot.title = element_text(face = "bold"))
+}
+```
+
+---
+
+# 🟡 INTERESSANTE
+
+## 5. Taxa de Tentativas por Segundo — CPU vs GPU
+
+**Pergunta:** Qual o throughput real de cada hardware?
+
+```{r throughput}
+# Se tiver coluna hardware (benchmark.csv) use; caso contrário agrupa por método
+if ("hardware" %in% names(df)) {
+  hw_col <- "hardware"
+  hw_labels <- c("cpu" = "CPU (Ryzen 7 5700X)", "gpu" = "GPU (RTX 5060)")
+  hw_colors <- c("cpu" = "#E69F00", "gpu" = "#56B4E9")
+  
+  df %>%
+    filter(attempts_per_sec > 0) %>%
+    group_by(hardware) %>%
+    summarise(median_aps = median(attempts_per_sec), .groups = "drop") %>%
+    ggplot(aes(x = hardware, y = median_aps, fill = hardware)) +
+    geom_col(color = "black", alpha = 0.85, width = 0.5) +
+    scale_y_continuous(labels = label_number(scale = 1e-9, suffix = " B/s")) +
+    scale_fill_manual(values = hw_colors) +
+    scale_x_discrete(labels = hw_labels) +
+    labs(title = "Throughput Mediano de Cada Hardware",
+         x = NULL, y = "Tentativas por segundo (Bilhões)") +
+    theme_bw(base_size = 13) +
+    theme(legend.position = "none", plot.title = element_text(face = "bold"))
+} else {
+  df %>%
+    filter(attempts_per_sec > 0) %>%
+    ggplot(aes(x = attempts_per_sec)) +
+    geom_histogram(fill = "#3498db", color = "black", bins = 30, alpha = 0.8) +
+    scale_x_continuous(labels = label_number(scale = 1e-6, suffix = " M/s")) +
+    labs(title = "Distribuição do Throughput de Tentativas/s",
+         x = "Tentativas por segundo (Milhões)", y = "Frequência") +
+    theme_bw(base_size = 13) +
+    theme(plot.title = element_text(face = "bold"))
+}
+```
+
+---
+
+## 6. Entropia vs Tempo de Crack
+
+**Pergunta:** Qual métrica de entropia melhor prediz dificuldade de quebrar?
+
+```{r entropy-vs-time, eval=("entropy_max" %in% names(df))}
+df_ent <- df %>%
+  filter(method == "brute_force" & cracktime_s > 0 & !is.na(entropy_max)) %>%
+  pivot_longer(cols = c(entropy_max, entropy_class, entropy_shannon),
+               names_to = "tipo", values_to = "entropia") %>%
+  filter(!is.na(entropia) & entropia > 0)
+
+if (nrow(df_ent) > 0) {
+  ggplot(df_ent, aes(x = entropia, y = cracktime_s, color = tipo)) +
+    geom_point(alpha = 0.5, size = 2) +
+    geom_smooth(method = "lm", se = FALSE, size = 1.2) +
+    scale_y_log10(labels = label_comma()) +
+    facet_wrap(~tipo, scales = "free_x") +
+    labs(title   = "Correlação: Entropia × Tempo de Crack",
+         subtitle = "Qual métrica melhor prediz a resistência real?",
+         x = "Valor de Entropia", y = "Tempo de Crack (s) — log10",
+         color = "Tipo de Entropia") +
+    theme_bw(base_size = 12) +
+    theme(legend.position = "none", plot.title = element_text(face = "bold"))
+} else {
+  cat("Dados de entropia não disponíveis ou sem brute-force suficiente.\n")
+}
+```
+
+---
+
+## 7. Early Ratio — Quão Cedo a Senha Foi Encontrada?
+
+**Pergunta:** O brute-force encontrou a senha logo de cara ou percorreu quase todo o espaço?  
+**Interpretação:** `early_ratio` ≈ posição relativa da senha no espaço de busca (0 = no início, 1 = no final).
+
+```{r early-ratio, eval=("early_ratio" %in% names(df))}
+df_er <- df %>% filter(method == "brute_force" & !is.na(early_ratio) & early_ratio > 0)
+
+if (nrow(df_er) > 0) {
+  ggplot(df_er, aes(x = early_ratio)) +
+    geom_histogram(fill = "#e74c3c", color = "black", bins = 30, alpha = 0.8) +
+    geom_vline(xintercept = 0.5, linetype = "dashed", color = "white", size = 1) +
+    scale_x_continuous(labels = label_percent()) +
+    labs(title   = "Distribuição do Early Ratio (Brute-Force)",
+         subtitle = "Se uniforme → senha não tem padrão. Pico à esquerda → senhas com chars iniciais do charset",
+         x = "% do espaço percorrido até encontrar a senha",
+         y = "Frequência") +
+    theme_bw(base_size = 13) +
+    theme(plot.title = element_text(face = "bold"))
+}
+```
+
+---
+
+## 8. Tempo de Dicionário — O Rockyou é Rápido o Suficiente?
+
+**Pergunta:** Quanto tempo leva para varrer o rockyou.txt?
+
+```{r dict-time}
+df_dict <- df %>% filter(!is.na(dict_time_s) & dict_time_s > 0)
+
+if (nrow(df_dict) > 0) {
+  ggplot(df_dict, aes(x = dict_time_s * 1000)) +
+    geom_histogram(fill = "#f39c12", color = "black", bins = 25, alpha = 0.85) +
+    labs(title   = "Tempo de Varredura do Dicionário (Rockyou.txt)",
+         subtitle = "Distribuição do tempo gasto na fase de dicionário",
+         x = "Tempo (ms)", y = "Frequência") +
+    theme_bw(base_size = 13) +
+    theme(plot.title = element_text(face = "bold"))
+}
+```
+
+---
+
+# 🟢 INFORMATIVO / CONTEXTUAL
+
+## 9. Distribuição dos Métodos de Crack
+
+```{r methods}
+df %>%
+  count(method) %>%
+  mutate(pct = n / sum(n) * 100,
+         method = fct_reorder(method, n)) %>%
+  ggplot(aes(x = method, y = n, fill = method)) +
+  geom_col(color = "black", alpha = 0.85) +
+  geom_text(aes(label = paste0(n, " (", round(pct,1), "%)")),
+            hjust = -0.05) +
+  coord_flip() +
+  scale_fill_brewer(palette = "Set2") +
+  labs(title = "Frequência por Método de Crack",
+       x = NULL, y = "Quantidade") +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "none", plot.title = element_text(face = "bold"))
+```
+
+## 10. Distribuição de Comprimento das Senhas Testadas
+
+```{r length-dist}
+df %>%
+  count(pwd_length) %>%
+  ggplot(aes(x = pwd_length, y = n)) +
+  geom_col(fill = "#2980b9", color = "black", alpha = 0.85) +
+  scale_x_continuous(breaks = 1:20) +
+  labs(title = "Distribuição de Comprimento das Senhas",
+       x = "Número de Caracteres", y = "Quantidade") +
+  theme_bw(base_size = 13) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+## 11. Distribuição das Classes de Força (Regex)
+
+```{r strength-dist}
+df %>%
+  count(strength) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ggplot(aes(x = strength, y = n, fill = strength)) +
+  geom_col(color = "black", alpha = 0.85, width = 0.5) +
+  geom_text(aes(label = paste0(n, "\n(", round(pct,1), "%)")),
+            vjust = -0.2, fontface = "bold") +
+  scale_fill_manual(values = c(Weak = "#e74c3c", Medium = "#f39c12", Strong = "#2ecc71")) +
+  labs(title = "Distribuição das Classificações pelo Regex",
+       x = "Classe", y = "Quantidade") +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "none", plot.title = element_text(face = "bold"))
+```
+
+## 12. Latência por Tentativa
+
+```{r latency}
+df_lat <- df %>% filter(latency_ns > 0 & !is.na(latency_ns))
+
+if (nrow(df_lat) > 0) {
+  ggplot(df_lat, aes(x = latency_ns)) +
+    geom_histogram(fill = "#16a085", color = "black", bins = 30, alpha = 0.85) +
+    scale_x_log10(labels = label_comma()) +
+    labs(title   = "Distribuição da Latência por Tentativa",
+         subtitle = "Escala log10 — com KDF a latência deve ser muito maior",
+         x = "Latência por tentativa (ns) — log10",
+         y = "Frequência") +
+    theme_bw(base_size = 13) +
+    theme(plot.title = element_text(face = "bold"))
+}
+```
+
+---
+
+# Resumo Executivo — Perguntas-Chave
+
+```{r summary-table}
+summary_df <- df %>%
+  summarise(
+    total_senhas        = n(),
+    pct_vazadas         = paste0(round(mean(leaked) * 100, 1), "%"),
+    pct_strong_safe     = paste0(round(mean(strength == "Strong" & verdict == "SURVIVED",
+                                            na.rm=TRUE) * 100, 1), "%"),
+    comprimento_medio   = round(mean(pwd_length), 1),
+    comprimento_mediano = median(pwd_length)
+  )
+
+knitr::kable(t(summary_df), col.names = c("Valor"),
+             caption = "Resumo Geral dos Dados")
+```
+
+---
+
+*Gerado pelo Kracken Analysis Notebook — UFCG 2026*
