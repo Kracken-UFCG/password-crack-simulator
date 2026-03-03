@@ -3,14 +3,22 @@
 classify_password() {
     local pass="$1"
     local score=0
-    [[ ${#pass} -ge 6 ]] && ((score++))
-    [[ "$pass" =~ [A-Z] ]] && ((score++))
-    [[ "$pass" =~ [0-9] ]] && ((score++))
-    [[ "$pass" =~ [@#$*%+=-] ]] && ((score++))
 
-    if [[ $score -le 1 ]]; then echo "weak"
-    elif [[ $score -eq 2 ]] || [[ $score -eq 3 ]]; then echo "medium"
-    else echo "strong"; fi
+    [[ "$pass" =~ [A-Z] ]] && ((score++))
+    [[ "$pass" =~ [a-z] ]] && ((score++))
+    [[ "$pass" =~ [0-9] ]] && ((score++))
+    [[ "$pass" =~ [^a-zA-Z0-9] ]] && ((score++))
+
+    [[ "$pass" =~ (.)\1 ]] && ((score--))
+    [[ "${pass,,}" =~ (123|abc|qwerty) ]] && ((score--))
+
+    if [[ $score -le 1 ]]; then
+        echo "weak"
+    elif [[ $score -le 3 ]]; then
+        echo "medium"
+    else
+        echo "strong"
+    fi
 }
 
 crack_password() {
