@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>KRACKEN — Password Crack Simulator</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <div class="scanlines"></div>
+    <div class="noise"></div>
+
+    <main>
+        <div class="principal-container">
+
+            <header class="app-header">
+                <div class="logo-group">
+                    <svg class="lock-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 138 145" fill="none">
+                        <path d="M96.25 48.125C103.812 48.125 110 54.3125 110 61.875V130.625C110 138.188 103.812 144.375 96.25 144.375H13.75C6.1875 144.375 0 138.188 0 130.625V61.875C0 54.3125 6.1875 48.125 13.75 48.125H75.625V34.375C75.625 22.6875 66.6875 13.75 55 13.75C43.3125 13.75 34.375 22.6875 34.375 34.375H20.625C20.625 15.125 35.75 0 55 0C74.25 0 89.375 15.125 89.375 34.375V48.125H96.25ZM55 110C62.5625 110 68.75 103.812 68.75 96.25C68.75 88.6875 62.5625 82.5 55 82.5C47.4375 82.5 41.25 88.6875 41.25 96.25C41.25 103.812 47.4375 110 55 110ZM137.5 82.5H123.75V41.25H137.5V82.5ZM137.5 110H123.75V96.25H137.5V110Z" fill="currentColor"/>
+                    </svg>
+                    <div class="title-group">
+                        <h1 class="app-title">KRACKEN</h1>
+                        <span class="app-subtitle">PASSWORD CRACK SIMULATOR</span>
+                    </div>
+                </div>
+                <div class="status-badge">
+                    <span class="status-dot"></span>
+                    <span class="status-text">SYSTEM ONLINE</span>
+                </div>
+            </header>
+
+            <div class="divider"></div>
+
+            <div class="interact-container">
+
+                <div class="input-section">
+                    <div class="section-label">TARGET INPUT</div>
+
+                    <div class="input-box">
+                        <label for="password" class="floating-label">Password</label>
+                        <input type="password" id="password" class="styled-input" placeholder="Enter password..." autocomplete="off">
+                        <span class="eye-icon" onclick="togglePassword('password', this)">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                        </span>
+                    </div>
+
+                    <div class="input-box">
+                        <label for="confirm-password" class="floating-label">Confirm Password</label>
+                        <input type="password" id="confirm-password" class="styled-input" placeholder="Confirm password..." autocomplete="off">
+                        <span class="eye-icon" onclick="togglePassword('confirm-password', this)">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                        </span>
+                    </div>
+
+                    <div class="strength-wrapper">
+                        <div class="strength-header">
+                            <span class="strength-label-text">STRENGTH</span>
+                            <span class="strength-value" id="strength-label">—</span>
+                        </div>
+                        <div class="strength-bar-track">
+                            <div class="strength-bar-fill" id="strength-bar"></div>
+                        </div>
+                        <div class="strength-criteria" id="strength-criteria">
+                            <span class="criterion" id="c-len">✗ 8+ characters</span>
+                            <span class="criterion" id="c-upper">✗ Uppercase</span>
+                            <span class="criterion" id="c-number">✗ Number</span>
+                            <span class="criterion" id="c-special">✗ Special char</span>
+                            <span class="criterion" id="c-notriple">✗ No repetitions</span>
+                        </div>
+                    </div>
+
+                    <div class="toggle-row">
+                        <label class="toggle-label" for="gpu-toggle">USE GPU</label>
+                        <div class="toggle-switch" id="gpu-toggle-wrap" onclick="toggleGPU()">
+                            <input type="checkbox" id="gpu-toggle" hidden>
+                            <div class="toggle-track">
+                                <div class="toggle-thumb"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button id="crack-btn" onclick="runCrack()">
+                        <span id="btn-text">CRACK IT</span>
+                        <span id="btn-spinner" class="spinner hidden"></span>
+                    </button>
+
+                    <div class="error-msg hidden" id="error-msg"></div>
+                </div>
+
+                <div class="vertical-divider"></div>
+
+                <div class="classify-section">
+                    <div class="section-label">ANALYSIS OUTPUT</div>
+
+                    <div class="result-panel" id="result-panel">
+                        <div class="result-idle" id="result-idle">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" opacity="0.3">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                            <p>Awaiting target input...</p>
+                        </div>
+
+                        <div class="result-data hidden" id="result-data">
+
+                            <div class="result-row verdict-row">
+                                <span class="result-key">VERDICT</span>
+                                <span class="result-val verdict" id="r-verdict">—</span>
+                            </div>
+
+                            <div class="result-row">
+                                <span class="result-key">METHOD</span>
+                                <span class="result-val method-badge" id="r-method">—</span>
+                            </div>
+
+                            <div class="result-row">
+                                <span class="result-key">STRENGTH</span>
+                                <span class="result-val" id="r-strength">—</span>
+                            </div>
+
+                            <div class="separator"></div>
+
+                            <div class="result-row">
+                                <span class="result-key">CRACK TIME</span>
+                                <span class="result-val highlight" id="r-cracktime">—</span>
+                            </div>
+
+                            <div class="result-row">
+                                <span class="result-key">ATTEMPTS</span>
+                                <span class="result-val" id="r-attempts">—</span>
+                            </div>
+
+                            <div class="result-row">
+                                <span class="result-key">DICT ENTRIES</span>
+                                <span class="result-val" id="r-dict">—</span>
+                            </div>
+
+                            <div class="result-row">
+                                <span class="result-key">LATENCY / OP</span>
+                                <span class="result-val" id="r-latency">—</span>
+                            </div>
+
+                            <div class="result-row">
+                                <span class="result-key">ENGINE</span>
+                                <span class="result-val" id="r-engine">—</span>
+                            </div>
+
+                            <div class="separator"></div>
+
+                            <div class="terminal-block" id="r-terminal"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+    <script src="classifier.js"></script>
+    <script src="regex.js"></script>
+</body>
+</html>
